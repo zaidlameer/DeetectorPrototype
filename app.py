@@ -1,68 +1,72 @@
-from flask import Flask, request, render_template
 import os
+import torch
+import cv2
+from flask import Flask, render_template, request, redirect, url_for
 from werkzeug.utils import secure_filename
-# Import your model loading and prediction functions
-# Replace these with your actual model import and prediction
-# Example using tensorflow:
-# import tensorflow as tf
-# model = tf.keras.models.load_model('your_model.h5') 
+from transformers import AutoImageProcessor, AutoModelForImageClassification
+from PIL import Image
 
-app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'  # Create this folder
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'} # Add allowed extensions
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True) # Ensure the uploads folder exists
+app = Flask(_name_)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov'}
+
+# Initialize model and processor
+model = AutoModelForImageClassification.from_pretrained("model/")
+processor = AutoImageProcessor.from_pretrained("Wvolf/ViT_Deepfake_Detection")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+model.eval()
 
 def allowed_file(filename):
     return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-# Your prediction function
-def predict_image(image_path):
-    """
-    Loads an image from image_path, preprocesses it, and makes a prediction using the loaded model.
-    """
-    try:
-        # Replace with your actual image loading and preprocessing code
-        # Example using PIL (Pillow):
-        from PIL import Image
-        img = Image.open(image_path).convert('RGB') # Ensure RGB format
-        img = img.resize((224, 224)) # Example resize, adjust to your model's input size
-        # Example using numpy for preprocessing (adjust to your model's needs):
-        import numpy as np
-        img_array = np.array(img) / 255.0
-        img_array = np.expand_dims(img_array, axis=0) # Add batch dimension
-        # Make prediction
-        # prediction = model.predict(img_array)
-        # Example if your model returns probabilities:
-        # predicted_class = np.argmax(prediction)
-        # return f"Predicted Class: {predicted_class}"
-        # Example returning a placeholder
-        return "Prediction result will be shown here."
-
-    except Exception as e:
-        return f"Error during prediction: {str(e)}"
+def preprocess_frame(frame):
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    return processor(image, return_tensors="pt").pixel_values.squeeze()
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        # check if the post request has the file part
         if 'file' not in request.files:
-            return render_template('index.html', message='No file part')
+            return redirect(request.url)
+            
         file = request.files['file']
-        # If the user does not select a file, the browser submits an
-        # empty file without a filename.
         if file.filename == '':
-            return render_template('index.html', message='No selected file')
+            return redirect(request.url)
+
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            prediction = predict_image(file_path)
-            return render_template('index.html', message='File successfully uploaded and prediction made!', prediction=prediction)
-        else:
-            return render_template('index.html', message='Allowed file types are png, jpg, jpeg, gif')
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            
+            # Process video
+            prediction = process_video(filepath)
+            return render_template('index.html', prediction=prediction)
+    
     return render_template('index.html')
 
-if __name__ == '__main__':
-    app.run(debug=True) # debug=True for development. Set to False in production.
+def process_video(video_path):
+    cap = cv2.VideoCapture(video_path)
+    predictions = []
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        pixel_values = preprocess_frame(frame).unsqueeze(0).to(device)
+        
+        with torch.no_grad():
+            outputs = model(pixel_values=pixel_values)
+            predicted_class_idx = outputs.logits.argmax(-1).item()
+            predictions.append(predicted_class_idx)
+    
+    cap.release()
+    average_prediction = sum(predictions) / len(predictions)
+    return "Fake Video" if average_prediction > 0.5 else "Real Video"
+
+if _name_ == '_main_':
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    app.run(debug=True)
+

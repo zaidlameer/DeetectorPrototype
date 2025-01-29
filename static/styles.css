@@ -1,0 +1,63 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f2f5;
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+h1 {
+    color: #1a73e8;
+    text-align: center;
+}
+
+.upload-box {
+    border: 2px dashed #ccc;
+    padding: 30px;
+    text-align: center;
+    margin: 20px 0;
+}
+
+input[type="file"] {
+    display: none;
+}
+
+label[for="file"] {
+    cursor: pointer;
+    color: #1a73e8;
+    font-weight: bold;
+}
+
+button {
+    background: #1a73e8;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    width: 100%;
+    font-size: 16px;
+}
+
+.result {
+    margin-top: 30px;
+    text-align: center;
+}
+
+.prediction {
+    font-size: 24px;
+    font-weight: bold;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.real { color: #34a853; background: #e6f4ea; }
+.fake { color: #ea4335; background: #fce8e6; }
