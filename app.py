@@ -1,72 +1,72 @@
-import os
+from flask import Flask, request, render_template, jsonify
 import torch
 import cv2
-from flask import Flask, render_template, request, redirect, url_for
-from werkzeug.utils import secure_filename
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+import numpy as np
+from transformers import AutoModelForImageClassification, AutoImageProcessor
 from PIL import Image
+import os
 
-app = Flask(_name_)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov'}
+app = Flask(__name__)
 
-# Initialize model and processor
-model = AutoModelForImageClassification.from_pretrained("model/")
-processor = AutoImageProcessor.from_pretrained("Wvolf/ViT_Deepfake_Detection")
+# Load the model
+MODEL_PATH = "model/ViT_Deepfake_Detection"
+MODEL_NAME = "Wvolf/ViT_Deepfake_Detection"
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = model.to(device)
+model = AutoModelForImageClassification.from_pretrained(MODEL_PATH).to(device)
 model.eval()
+processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
 
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+UPLOAD_FOLDER = "static/uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 def preprocess_frame(frame):
+    """Convert OpenCV frame to PIL and preprocess."""
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    return processor(image, return_tensors="pt").pixel_values.squeeze()
+    inputs = processor(images=image, return_tensors="pt")
+    return inputs["pixel_values"].squeeze(0).to(device)
 
-@app.route('/', methods=['GET', 'POST'])
-def upload_file():
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            return redirect(request.url)
-            
-        file = request.files['file']
-        if file.filename == '':
-            return redirect(request.url)
-
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            # Process video
-            prediction = process_video(filepath)
-            return render_template('index.html', prediction=prediction)
-    
-    return render_template('index.html')
-
-def process_video(video_path):
+def predict_video(video_path):
+    """Process video frame-by-frame and predict deepfake likelihood."""
     cap = cv2.VideoCapture(video_path)
     predictions = []
-    
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-            
-        pixel_values = preprocess_frame(frame).unsqueeze(0).to(device)
-        
+
+        pixel_values = preprocess_frame(frame).unsqueeze(0)
         with torch.no_grad():
             outputs = model(pixel_values=pixel_values)
             predicted_class_idx = outputs.logits.argmax(-1).item()
             predictions.append(predicted_class_idx)
-    
+
     cap.release()
-    average_prediction = sum(predictions) / len(predictions)
-    return "Fake Video" if average_prediction > 0.5 else "Real Video"
 
-if _name_ == '_main_':
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    if len(predictions) == 0:
+        return "Error: No frames processed"
+
+    avg_pred = sum(predictions) / len(predictions)
+    return "Fake Video" if avg_pred > 0.5 else "Real Video"
+
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+@app.route("/predict", methods=["POST"])
+def upload_video():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
+    file.save(file_path)
+    
+    result = predict_video(file_path)
+
+    return jsonify({"prediction": result, "video_path": file_path})
+
+if __name__ == "__main__":
     app.run(debug=True)
-
