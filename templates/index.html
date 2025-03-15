@@ -3,19 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deepfake Detection</title>
+    <title>DEETECTOR</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script defer src="{{ url_for('static', filename='script.js') }}"></script>
 </head>
 <body>
+    <header>
+        <nav class="navbar">
+            <h1>DEETECTOR</h1>
+            <ul class="nav-links">
+                <li><a href="#">Home</a></li>
+                <li><a href="#">About</a></li>
+                <li><a href="#">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
     <div class="container">
-        <h1>Deepfake Detection System</h1>
-        <form id="upload-form">
-            <input type="file" id="video-file" accept="video/*" required>
+        <h2>Deepfake Video Detection</h2>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="file" id="video-input" name="video" accept="video/mp4" required>
             <button type="submit">Upload & Analyze</button>
         </form>
-        <div id="loading" class="hidden">Processing...</div>
-        <div id="result"></div>
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p>Processing video, please wait...</p>
+        </div>
+        <div id="results" class="hidden">
+            <h2>Results</h2>
+            <p><strong>Audio Analysis:</strong> <span id="audio-result"></span></p>
+            <p><strong>Video Analysis:</strong> <span id="video-result"></span></p>
+        </div>
     </div>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

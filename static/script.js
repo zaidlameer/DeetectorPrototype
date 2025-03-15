@@ -1,41 +1,41 @@
-document.getElementById("upload-form").addEventListener("submit", function(event) {
+document.getElementById("upload-form").addEventListener("submit", async function(event) {
     event.preventDefault();
-
-    let fileInput = document.getElementById("video-file");
-    let file = fileInput.files[0];
-
-    if (!file) {
+    
+    const fileInput = document.getElementById("video-input");
+    const loadingDiv = document.getElementById("loading");
+    const resultsDiv = document.getElementById("results");
+    const audioResult = document.getElementById("audio-result");
+    const videoResult = document.getElementById("video-result");
+    
+    if (fileInput.files.length === 0) {
         alert("Please select a video file.");
         return;
     }
-
-    let formData = new FormData();
-    formData.append("file", file);
-
-    let loadingDiv = document.getElementById("loading");
-    let resultDiv = document.getElementById("result");
+    
+    const formData = new FormData();
+    formData.append("video", fileInput.files[0]);
+    
     loadingDiv.classList.remove("hidden");
-    resultDiv.innerHTML = "";
-
-    fetch("/predict_video", {
-        method: "POST",
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        loadingDiv.classList.add("hidden");
-        if (data.error) {
-            resultDiv.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+    resultsDiv.classList.add("hidden");
+    
+    try {
+        const response = await fetch("/upload", {
+            method: "POST",
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.error) {
+            alert("Error: " + result.error);
         } else {
-            resultDiv.innerHTML = `
-                <p><strong>Final Prediction:</strong> ${data.final_prediction}</p>
-                <p><strong>Audio Prediction:</strong> ${data.audio_prediction} (${(data.audio_probability * 100).toFixed(2)}%)</p>
-                <p><strong>Video Prediction:</strong> ${data.video_prediction} (${(data.video_probability * 100).toFixed(2)}%)</p>
-            `;
+            audioResult.textContent = result.audio_result;
+            videoResult.textContent = result.video_result;
+            resultsDiv.classList.remove("hidden");
         }
-    })
-    .catch(error => {
+    } catch (error) {
+        alert("Failed to process the video.");
+    } finally {
         loadingDiv.classList.add("hidden");
-        resultDiv.innerHTML = `<p style="color: red;">Error: ${error}</p>`;
-    });
+    }
 });

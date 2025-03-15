@@ -1,126 +1,166 @@
-from flask import Flask, request, render_template, jsonify
-import torch
-import librosa
-import numpy as np
-import cv2
-import ffmpeg
+from flask import Flask, request, jsonify, render_template
 import os
-from transformers import (
-    AutoModelForAudioClassification, AutoFeatureExtractor,
-    AutoModelForImageClassification, AutoImageProcessor
-)
+import cv2
+import subprocess
+import torch
+import numpy as np
+# import fer
+import librosa
+from werkzeug.utils import secure_filename
+from transformers import AutoModelForImageClassification, AutoProcessor
+from PIL import Image
+import tensorflow as tf
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = "uploads"
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Define local paths to the saved models
-AUDIO_MODEL_PATH = "model/Deepfake_Audio_Detection"
-VIDEO_MODEL_PATH = "model/ViT_Deepfake_Detection"
+# Load the models
+AUDIO_MODEL_PATH = "./modelsV2/audio_classification_model.h5"
+VIDEO_MODEL_DIR = "./modelsV2/distilled_deepfake_model"
 
-# Load models
-audio_model = AutoModelForAudioClassification.from_pretrained(AUDIO_MODEL_PATH).to("cuda" if torch.cuda.is_available() else "cpu").eval()
-audio_feature_extractor = AutoFeatureExtractor.from_pretrained(AUDIO_MODEL_PATH)
-video_model = AutoModelForImageClassification.from_pretrained(VIDEO_MODEL_PATH).to("cuda" if torch.cuda.is_available() else "cpu").eval()
-video_processor = AutoImageProcessor.from_pretrained(VIDEO_MODEL_PATH)
+audio_model = tf.keras.models.load_model(AUDIO_MODEL_PATH, compile=False)
+video_processor = AutoProcessor.from_pretrained(VIDEO_MODEL_DIR)
+video_model = AutoModelForImageClassification.from_pretrained(VIDEO_MODEL_DIR)
 
-UPLOAD_FOLDER = "static/uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-
-def extract_audio_from_video(video_path, audio_output_path):
-    """Extracts audio from video using ffmpeg."""
+def check_ffmpeg():
+    print("Checking ffmpeg")
     try:
-        ffmpeg.input(video_path).output(audio_output_path, format='wav', acodec='pcm_s16le', ar='16000').run(overwrite_output=True, quiet=True)
-        if not os.path.exists(audio_output_path) or os.path.getsize(audio_output_path) == 0:
-            return False
+        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         return True
-    except Exception as e:
-        print(f"Audio extraction failed: {e}")
+    except FileNotFoundError:
         return False
 
+def split_audio_video(video_path, audio_output, video_output):
+    print("Splitting audio and video")
+    audio_cmd = ["ffmpeg", "-i", video_path, "-vn", "-acodec", "copy", audio_output]
+    video_cmd = ["ffmpeg", "-i", video_path, "-an", "-vcodec", "copy", video_output]
+    
+    try:
+        subprocess.run(audio_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        subprocess.run(video_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def preprocess_audio(file_path, sr=None, n_mfcc=40):
+    print("Preprocessing audio")
+    y, sr = librosa.load(file_path, sr=sr)
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
+    mfccs_scaled = np.mean(mfccs.T, axis=0)
+    return np.expand_dims(mfccs_scaled, axis=0)
+
+def predict_audio(file_path):
+    print("Predicting audio...")
+    input_data = preprocess_audio(file_path)
+    prediction = audio_model.predict(input_data)[0][0]
+    return "Deepfake" if prediction >= 0.5 else "Real"
+
 def extract_frames_from_video(video_path):
-    """Extracts frames from video using OpenCV."""
+    print("Extracting frames from the video")
     cap = cv2.VideoCapture(video_path)
     frames = []
-    
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frames.append(frame_rgb)
-    
     cap.release()
     return frames
 
-def predict_audio(audio_file_path):
-    """Predict if the audio is deepfake."""
-    audio, sample_rate = librosa.load(audio_file_path, sr=16000)
-    inputs = audio_feature_extractor(audio, sampling_rate=sample_rate, return_tensors="pt").to(audio_model.device)
+# def extract_emotion_frames_from_video(video_path, frame_skip=5, output_folder="emotion_frames"):
     
+#     print(f"Extracting emotion-based frames from {video_path}")
+#     cap = cv2.VideoCapture(video_path)
+#     detector = FER()
+#     frame_count = 0
+#     saved_frames = []
+#     last_max_emotion = None
+
+#     if not os.path.exists(output_folder):
+#         os.makedirs(output_folder)
+
+#     while cap.isOpened():
+#         ret, frame = cap.read()
+#         if not ret:
+#             break
+
+#         if frame_count % frame_skip == 0:
+#             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+#             try:
+#                 emotions_list = detector.detect_emotions(frame_rgb)
+#                 if emotions_list:
+#                     max_face_emotion = max(emotions_list, key=lambda x: max(x['emotions'].values()))
+#                     max_emotion_label = max(max_face_emotion['emotions'], key=max_face_emotion['emotions'].get)
+
+#                     if last_max_emotion is None or max_emotion_label != last_max_emotion:
+#                         x, y, w, h = max_face_emotion['box']
+#                         x1, y1, x2, y2 = x - 10, y + 10, x - 10 + w + 20, y + 10 + h
+#                         face = frame[y1:y2, x1:x2]
+#                         if face is not None and face.size > 0: # Check if the face is valid.
+#                             face_resized = cv2.resize(face, (128, 128))
+#                             frame_filename = os.path.join(output_folder, f"frame_{frame_count}.png")
+#                             cv2.imwrite(frame_filename, face_resized)
+#                             saved_frames.append(frame_filename)
+#                             print(f"Saved frame {frame_count} with emotion: {max_emotion_label}")
+#                             last_max_emotion = max_emotion_label
+
+#             except Exception as e:
+#                 print(f"Error processing frame {frame_count}: {e}")
+
+#         frame_count += 1
+
+#     cap.release()
+#     print(f"Extracted {len(saved_frames)} emotion-based frames.")
+#     return saved_frames
+
+
+def predict_video(frames):
+    print("Predicting video")
+    video_model.eval()
     with torch.no_grad():
-        logits = audio_model(**inputs).logits
-    
-    probabilities = torch.softmax(logits, dim=-1).cpu().numpy()[0]
-    class_labels = ["Real", "Fake"]
-    predicted_index = np.argmax(probabilities)
-    return class_labels[predicted_index], probabilities[predicted_index]
+        predictions = []
+        for frame in frames:
+            image = Image.fromarray(frame)
+            inputs = video_processor(images=image, return_tensors="pt")
+            outputs = video_model(**inputs)
+            logits = outputs.logits
+            predicted_class = torch.argmax(logits, dim=-1).item()
+            labels = video_model.config.id2label
+            predictions.append(labels.get(predicted_class, f"Class {predicted_class}"))
+    return max(set(predictions), key=predictions.count)
 
-def predict_video(video_file_path):
-    """Predict if the video is deepfake."""
-    frames = extract_frames_from_video(video_file_path)
-    if not frames:
-        return None, 0.0
-    
-    predictions = []
-    for frame in frames[::10]:  # Process every 10th frame for efficiency
-        inputs = video_processor(images=frame, return_tensors="pt").to(video_model.device)
-        with torch.no_grad():
-            logits = video_model(**inputs).logits
-            predicted_index = logits.argmax(-1).item()
-            predictions.append(predicted_index)
-    
-    avg_prediction = np.mean(predictions)
-    return "Fake Video" if avg_prediction > 0.5 else "Real Video", avg_prediction
-
-@app.route("/")
-def home():
+@app.route('/')
+def index():
     return render_template("index.html")
 
-@app.route("/predict_video", methods=["POST"])
-def upload_video():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'video' not in request.files:
+        return jsonify({"error": "No file uploaded"})
     
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
 
-    print("break point here")
+    print("file uploaded successfully")
+    file = request.files['video']
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
     
-    video_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-    file.save(video_path)
+    audio_path = file_path.replace('.mp4', '.aac')
+    video_path = file_path.replace('.mp4', '_video.mp4')
     
-    audio_path = video_path.replace(".mp4", ".wav")
-    has_audio = extract_audio_from_video(video_path, audio_path)
+    if not check_ffmpeg() or not split_audio_video(file_path, audio_path, video_path):
+        return jsonify({"error": "FFmpeg error"})
     
-    try:
-        audio_pred, audio_prob = ("No Audio", 0.0) if not has_audio else predict_audio(audio_path)
-        video_pred, video_prob = predict_video(video_path)
-        
-        final_prediction = "Fake" if (audio_pred == "Fake" or video_pred == "Fake Video") else "Real"
-        
-        result = {
-            "audio_prediction": audio_pred,
-            "audio_probability": audio_prob,
-            "video_prediction": video_pred,
-            "video_probability": video_prob,
-            "final_prediction": final_prediction
-        }
-    except Exception as e:
-        return jsonify({"error": f"Prediction failed: {e}"}), 500
-    
-    return jsonify(result)
+    print("audio video splitting completed")
 
-if __name__ == "__main__":
+    audio_result = predict_audio(audio_path)
+    frames = extract_frames_from_video(video_path)
+    video_result = predict_video(frames)
+    print("Prediction completed")
+    
+    return jsonify({"audio_result": audio_result, "video_result": video_result})
+
+if __name__ == '__main__':
     app.run(debug=True)
