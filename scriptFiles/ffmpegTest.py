@@ -2,7 +2,7 @@ import subprocess
 import os
 
 # Define input MP4 file and output paths
-input_file = "C:/Users/zaidl/Downloads/DEMONSTRATION/fake_billGates.mp4"  # Change this to your actual file
+input_file = "C:/Users/zaidl/Downloads/DEMONSTRATION/real_billGates.mp4"  # Change this to your actual file
 output_audio = "output_audio.aac"
 output_video = "output_video.mp4"
 
