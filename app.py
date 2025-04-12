@@ -23,7 +23,9 @@ audio_model = tf.keras.models.load_model(AUDIO_MODEL_PATH, compile=False)
 image_model = AutoModelForImageClassification.from_pretrained(IMAGE_MODEL_PATH, num_labels=2, ignore_mismatched_sizes=True)
 image_model.eval()
 
+# set the correct lables
 LABELS = {0: "Real", 1: "Fake"}
+
 
 preprocess_image = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -55,7 +57,10 @@ def preprocess_audio(file_path, sr=None, n_mfcc=40):
 def predict_audio(file_path):
     input_data = preprocess_audio(file_path)
     prediction = audio_model.predict(input_data)[0][0]
-    return "Fake" if prediction >= 0.5 else "Real"
+    label = "Fake" if prediction >= 0.5 else "Real"
+    confidence = float(prediction if label == "Fake" else 1 - prediction)
+    return label, confidence
+
 
 def extract_frames_from_video(video_path, num_frames=16):
     cap = cv2.VideoCapture(video_path)
@@ -86,14 +91,26 @@ def extract_frames_from_video(video_path, num_frames=16):
 def predict_video(frames):
     with torch.no_grad():
         predictions = []
+        confidences = []
         for frame in frames:
             image = Image.fromarray(frame)
             input_tensor = preprocess_image(image).unsqueeze(0)
             outputs = image_model(input_tensor)
             probabilities = torch.softmax(outputs.logits, dim=1)
             predicted_class = torch.argmax(probabilities, dim=1).item()
-            predictions.append(LABELS.get(predicted_class, "Unknown"))
-    return max(set(predictions), key=predictions.count)
+            confidence = float(torch.max(probabilities).item())
+            predictions.append(predicted_class)
+            confidences.append(confidence)
+        
+        # Majority vote
+        final_label_id = max(set(predictions), key=predictions.count)
+        final_label = LABELS.get(final_label_id, "Unknown")
+
+        # Average confidence for the predicted class
+        final_confidence = float(np.mean([confidences[i] for i in range(len(predictions)) if predictions[i] == final_label_id]))
+
+    return final_label, final_confidence
+
 
 def cleanup_files(*file_paths):
     for file_path in file_paths:
@@ -120,14 +137,20 @@ def upload_file():
     if not check_ffmpeg() or not split_audio_video(file_path, audio_path, video_path):
         cleanup_files(file_path)
         return jsonify({"error": "FFmpeg error"})
-    
-    audio_result = predict_audio(audio_path)
+
+    audio_result, audio_confidence = predict_audio(audio_path)
     frames = extract_frames_from_video(video_path)
-    video_result = predict_video(frames)
+    video_result, video_confidence = predict_video(frames)
 
     cleanup_files(file_path, audio_path, video_path)
 
-    return jsonify({"audio_result": audio_result, "video_result": video_result})
+    return jsonify({
+        "audio_result": audio_result,
+        "audio_confidence": round(audio_confidence * 100, 2),
+        "video_result": video_result,
+        "video_confidence": round(video_confidence * 100, 2)
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=True)

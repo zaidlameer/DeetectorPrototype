@@ -6,12 +6,14 @@
     <title>DEETECTOR</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script defer src="{{ url_for('static', filename='script.js') }}"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <header>
         <nav class="navbar">
             <h1>DEETECTOR</h1>
-        </nav>
+            <button id="theme-toggle">🌙</button>
+        </nav>        
     </header>
     <div class="container">
         <h2>Deepfake Video Detection</h2>
@@ -25,8 +27,17 @@
         </div>
         <div id="results" class="hidden">
             <h2>Results</h2>
-            <p><strong>Audio Analysis:</strong> <span id="audio-result"></span></p>
-            <p><strong>Video Analysis:</strong> <span id="video-result"></span></p>
+            <p><strong>Audio Analysis:</strong> 
+                <span id="audio-result"></span> 
+                <em>(Confidence: <span id="audio-confidence"></span>)</em>
+             </p>
+             
+             <p><strong>Video Analysis:</strong> 
+                <span id="video-result"></span> 
+                <em>(Confidence: <span id="video-confidence"></span>)</em>
+             </p>
+             
+             <video id="uploaded-video" width="480" height="320" controls style="display: none;"></video>             
         </div>
     </div>
 </body>
