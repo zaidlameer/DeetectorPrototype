@@ -40,6 +40,7 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def check_ffmpeg():
+    print("Checking for ffmpeg")
     try:
         subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         return True
@@ -47,6 +48,7 @@ def check_ffmpeg():
         return False
 
 def split_audio_video(video_path, audio_output, video_output):
+    print("Splitting Audio and Video")
     try:
         subprocess.run(["ffmpeg", "-i", video_path, "-vn", "-acodec", "copy", audio_output], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         subprocess.run(["ffmpeg", "-i", video_path, "-an", "-vcodec", "copy", video_output], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -55,6 +57,7 @@ def split_audio_video(video_path, audio_output, video_output):
         return False
 
 def preprocess_audio(file_path, sr=None, n_mfcc=40):
+    print("Preprocess audio")
     try:
         y, sr = librosa.load(file_path, sr=sr)
         mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
@@ -64,6 +67,7 @@ def preprocess_audio(file_path, sr=None, n_mfcc=40):
         raise ValueError(f"Error processing audio file: {e}")
 
 def predict_audio(file_path):
+    print("Predicting the Audio")
     try:
         input_data = preprocess_audio(file_path)
         prediction = audio_model.predict(input_data)[0][0]
@@ -73,29 +77,88 @@ def predict_audio(file_path):
     except Exception as e:
         raise RuntimeError(f"Audio prediction failed: {e}")
 
-def extract_frames_from_video(video_path, num_frames=16):
+def has_audio_stream(video_path):
+    print("Checking if Video has audio Stream")
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", video_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        return bool(result.stdout.strip())
+    except subprocess.CalledProcessError:
+        return False
+
+# def extract_frames_from_video(video_path, num_frames=100):
+#     print("Extracting the frames from the video")
+#     try:
+#         cap = cv2.VideoCapture(video_path)
+#         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+#         if total_frames < num_frames:
+#             frame_indices = list(range(total_frames))
+#         else:
+#             frame_indices = sorted(np.random.choice(range(total_frames), num_frames, replace=False))
+
+#         frames = []
+#         current_idx = 0
+#         selected_idx = 0
+
+#         while cap.isOpened() and selected_idx < len(frame_indices):
+#             ret, frame = cap.read()
+#             if not ret:
+#                 break
+#             if current_idx == frame_indices[selected_idx]:
+#                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+#                 frames.append(frame_rgb)
+#                 selected_idx += 1
+#             current_idx += 1
+
+#         cap.release()
+
+#         if not frames:
+#             raise ValueError("No frames extracted from video.")
+#         return frames
+
+#     except Exception as e:
+#         raise RuntimeError(f"Error extracting frames: {e}")
+
+def extract_frames_from_video(video_path, num_frames=50):
     try:
         cap = cv2.VideoCapture(video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
 
-        if total_frames < num_frames:
+        if video_fps > 0:
+            target_fps = min(video_fps, 30)
+            frame_interval = int(round(video_fps / target_fps))
+        else:
+            frame_interval = 1 # Default to extracting every frame if fps is not available
+
+        if total_frames <= num_frames:
             frame_indices = list(range(total_frames))
         else:
-            frame_indices = sorted(np.random.choice(range(total_frames), num_frames, replace=False))
+            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+            frame_indices = sorted(list(set(indices))) # Remove potential duplicates
 
         frames = []
-        current_idx = 0
-        selected_idx = 0
+        current_frame_index = 0
+        extracted_frame_count = 0
 
-        while cap.isOpened() and selected_idx < len(frame_indices):
+        while cap.isOpened() and extracted_frame_count < len(frame_indices):
             ret, frame = cap.read()
             if not ret:
                 break
-            if current_idx == frame_indices[selected_idx]:
+
+            if current_frame_index in frame_indices:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frames.append(frame_rgb)
-                selected_idx += 1
-            current_idx += 1
+                extracted_frame_count += 1
+
+            current_frame_index += 1
 
         cap.release()
 
@@ -107,6 +170,7 @@ def extract_frames_from_video(video_path, num_frames=16):
         raise RuntimeError(f"Error extracting frames: {e}")
 
 def predict_video(frames):
+    print("Predicting the video")
     try:
         with torch.no_grad():
             predictions = []
@@ -166,18 +230,23 @@ def upload_file():
         cleanup_files(file_path)
         return jsonify({"error": "FFmpeg is not installed or not found in PATH."}), 500
 
-    if not split_audio_video(file_path, audio_path, video_path):
-        cleanup_files(file_path, audio_path, video_path)
-        return jsonify({"error": "Error splitting audio and video. Invalid or corrupted video file."}), 500
+    audio_result = "No audio stream found"
+    audio_confidence = None
 
     try:
-        audio_result, audio_confidence = predict_audio(audio_path)
-        frames = extract_frames_from_video(video_path)
+        if has_audio_stream(file_path):
+            if not split_audio_video(file_path, audio_path, video_path):
+                raise RuntimeError("Error splitting audio and video. Invalid or corrupted video file.")
+
+            audio_result, audio_confidence = predict_audio(audio_path)
+
+        # Video frame extraction and prediction
+        frames = extract_frames_from_video(video_path if os.path.exists(video_path) else file_path)
         video_result, video_confidence = predict_video(frames)
 
         response = {
-            "audio_result": audio_result,
-            "audio_confidence": round(audio_confidence * 100, 2),
+            "audio_result": audio_result if audio_confidence is None else audio_result,
+            "audio_confidence": None if audio_confidence is None else round(audio_confidence * 100, 2),
             "video_result": video_result,
             "video_confidence": round(video_confidence * 100, 2)
         }
