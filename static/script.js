@@ -33,15 +33,15 @@ document.getElementById("upload-form").addEventListener("submit", async function
         if (result.error) {
             alert("Error: " + result.error);
         } else {
-            // Set result text
+            // result text
             audioResult.textContent = result.audio_result;
             videoResult.textContent = result.video_result;
 
-            // Set confidence text
+            // confidence text
             audioConfidence.textContent = result.audio_confidence + "%";
             videoConfidence.textContent = result.video_confidence + "%";
 
-            // Show the uploaded video
+            // Show uploaded video
             uploadedVideo.src = URL.createObjectURL(file);
             uploadedVideo.style.display = "block";
 
