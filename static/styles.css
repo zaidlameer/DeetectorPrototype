@@ -172,3 +172,20 @@ body.dark-mode button[type="submit"] {
         transform: translateY(0);
     }
 }
+
+#clear-button {
+    background: #f44336; /* red */
+    border: none;
+    color: black;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
+    margin-left: 10px;
+}
+
+#clear-button:hover {
+    background: #d32f2f;
+    color: #fff;
+    transform: translateY(-2px);
+}
