@@ -29,7 +29,5 @@ Our mission is to build a robust defense against the rising tide of deepfake tec
 * **TensorFlow/PyTorch:** Deep learning frameworks for model development.
 * **OpenCV:** For image and video processing.
 * **Librosa:** For audio feature extraction.
-* **Scikit-learn:** For machine learning utilities.
-* **Mermaid.js:** For generating visual diagrams.
 
 ---
