@@ -1,3 +1,6 @@
+on: [push] # This tells GitHub to run the workflow whenever code is pushed to the repository.
+            # You could also use 'pull_request', 'workflow_dispatch', 'schedule', etc.
+
 jobs:
   test:
     runs-on: ubuntu-latest
